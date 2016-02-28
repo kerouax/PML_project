@@ -272,7 +272,7 @@ Our generalized boosted regression model has an in-sample accuracy of `r round(G
 
 #### Model comparison
 
-Comparing the three classification algorithms used and their respective results, we conclude that random forests algorithm produced the best accuracy of `r round(RFaccuracy*100, 2)`%, so we are going to use it to make the predictions on the test data set where we expect to get out-of-sample error of only `r round((1-RFaccuracy), 2)`%.
+Comparing the three classification algorithms used and their respective results, we conclude that random forests algorithm produced the best accuracy of `r round(RFaccuracy*100, 2)`%, so we are going to use it to make the predictions on the test data set where we expect to get out-of-sample error of only `r round((1-RFaccuracy)*100, 2)`%.
 
 **MODEL**                      |**ACCURACY**   
 -------------------------------|---------------
