@@ -1,0 +1,306 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "__Dino Budimlija__"
+output:
+  html_document:
+    theme: cerulean
+---
+
+```{r Installing required libraries, echo=FALSE, results="hide", message=FALSE, warning=FALSE, cache=TRUE}
+# Load required libraries
+if (!require("dplyr")) {
+    install.packages("dplyr")
+}
+
+if (!require("Hmisc")) {
+    install.packages("Hmisc")
+}
+
+if (!require("ggplot2")) {
+    install.packages("ggplot2")
+}
+
+if (!require("gridExtra")) {
+    install.packages("gridExtra")
+}
+
+if (!require("reshape2")) {
+    install.packages("reshape2")
+}
+
+if (!require("GGally")) {
+    install.packages("GGally")
+}
+
+if (!require("MASS")) {
+    install.packages("MASS")
+}
+
+if (!require("caret")) {
+    install.packages("caret")
+}
+
+if (!require("rattle")) {
+    install.packages("rattle", dep=TRUE)
+}
+
+if (!require("randomForest")) {
+    install.packages("randomForest")
+}
+
+if (!require("rpart.plot")) {
+    install.packages("rpart.plot")
+}
+
+
+library(dplyr)
+library(reshape2)
+library(GGally)
+library(gridExtra)
+library(ggplot2)
+library(caret)
+library(rattle)
+library(randomForest)
+library(rpart.plot)
+```
+
+### Qualitative assesment of weight lifting exercises
+
+The goal of this project is to build a machine learning model from the sample data acquired from motion sensors on participants bodies, which should most accurately predict the manner in which the weight lifting exercise was performed. The sensor data is used to investigate "how well" an activity was performed by the wearer. We will try three different classification prediction algorithms, check their accuracy on the training set and then use the best one to make prediction of the class variable ("classe" in original dataset, meaning class in portugese) in the test set and assigning it to one of 5 given values:
+
+* __Class A__: exactly according to the specification
+* __Class B__: throwing the elbows to the front
+* __Class C__: lifting the dumbbell only halfway
+* __Class D__: lowering the dumbbell only half way
+* __Class E__: throwing the hips to the front.
+
+#### Synopsis
+
+Using devices such as JawboneUp, NikeFuelBand, and Fitbitit is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this analysis, we will use sensor data acquired from accelerometers on the belt, forearm, arm, and dumbell of six participants between 20 to 28 years with little weight lifting experience during exercising with barbells. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the [Human Activity Recognition project](http://groupware.les.inf.puc-rio.br/har) webpage (see the section on the Weight Lifting Exercise Dataset).
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+#### Dataset description
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+
+```{r Get data, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+setwd("D:/My Data/Dropbox/My Studies/JHU DS Specialization/JHU 08 Practical Machine Learning/Project/Final Project")
+
+train_url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# load dataset
+if (!file.exists("./Data/training.csv")) {
+    download.file(train_url, destfile="./data/training.csv")
+}
+if (!file.exists("./Data/testing.csv")) {
+    download.file(test_url, destfile="./data/testing.csv")
+}
+
+training = read.csv("./data/training.csv", row.names = 1, header=TRUE, na.strings=c("NA", ""))
+test = read.csv("./data/testing.csv", row.names = 1, header=TRUE, na.strings=c("NA", ""))
+
+# vars for reporting dataset size
+rownum <- dim(training)[1]
+colnum <- dim(training)[2]
+
+# Number of unique data types
+datatypes = unique(sapply(training, class))
+```
+
+#### Cleaning and processing the dataset
+
+There are `r colnum` attributes in the dataset and `r rownum` observations. The data in the dataset consists of these three data types: `r datatypes`. 
+
+The dataset contains time series variables in columns 2 to 6 which are not related to the movement and are useless to our analysis so we'll discard them. Also there are lots of columns with the large number of missing values (more than 90% of the data missing) which we'll remove from the dataset.
+
+```{r Remove useless data, results="hide"}
+# Remove time-series data
+training = training[, -(2:6)]
+test = test[, -(2:6)]
+
+# Remove NAs
+nas <- colSums(is.na(training))
+table(nas)
+length(nas[nas == 0 ])
+length(nas[nas != 0 ])  
+
+NAcolumns <- sapply(training, function(x) (sum(is.na(x)) > 0.9*rownum)) # columns where more than 90% of data is NA
+training <- training[, NAcolumns == FALSE]
+test <- test[, NAcolumns == FALSE]
+attrNum = length(names(training)) # resulting variables in used dataset
+```
+
+After removing the columns with non-available data resulting dataset has `r attrNum` variables. Cleaned dataset looks like this:
+
+``` {r Dataset description, message=FALSE, warning=FALSE}
+# Describe dataset
+str(training)
+```
+
+To get a better look at our data we are going to make few density plots of four different types of variables grouped by the type of movement in all three directions:
+
+```{r Density plots, echo=FALSE, fig.height=6, fig.width=9, cache=TRUE,message=FALSE, warning=FALSE}
+#rm(test_url, train_url, attrNum, colnum, rownum, nas, NAcolumns) 
+
+g1 = ggplot(training) + 
+    geom_density(aes(x=gyros_belt_x), colour="steelblue1", fill="steelblue1", data=training, alpha=0.5) + 
+    geom_density(aes(x=gyros_belt_y), colour="red", fill="red", data=training, alpha=0.5) +
+    geom_density(aes(x=gyros_belt_z), colour="goldenrod1", fill="goldenrod1", data=training, alpha=0.5) +
+    theme_bw() + xlab("Gyro Belt (XYZ)") +
+     theme(#legend.position="none", 
+           text = element_text(size=12),
+           axis.title.x=element_text(vjust = -0.5),
+           axis.title=element_text(size=12, face="bold"), 
+           title=element_text(size=9, face="bold", vjust=1))
+
+g2 = ggplot(training) + 
+    geom_density(aes(x=roll_belt), colour="steelblue1", fill="steelblue1", data=training, alpha=0.5) + 
+    geom_density(aes(x=pitch_belt), colour="red", fill="red", data=training, alpha=0.5) +
+    geom_density(aes(x=yaw_belt), colour="goldenrod1", fill="goldenrod1", data=training, alpha=0.5) +
+    theme_bw() + xlab("Pitch Belt (XYZ)") +
+     theme(#legend.position="none", 
+           text = element_text(size=12),
+           axis.title.x=element_text(vjust = -0.5),
+           axis.title=element_text(size=12, face="bold"), 
+           title=element_text(size=9, face="bold", vjust=1))
+
+g3 = ggplot(training) + 
+    geom_density(aes(x=magnet_belt_x), colour="steelblue1", fill="steelblue1", data=training, alpha=0.5) + 
+    geom_density(aes(x=magnet_belt_y), colour="red", fill="red", data=training, alpha=0.5) +
+    geom_density(aes(x=magnet_belt_z), colour="goldenrod1", fill="goldenrod1", data=training, alpha=0.5) +
+    theme_bw() + xlab("Magnet Belt (XYZ)") +
+    theme(#legend.position="none", 
+           text = element_text(size=12),
+           axis.title.x=element_text(vjust = -0.5),
+           axis.title=element_text(size=12, face="bold"), 
+           title=element_text(size=9, face="bold", vjust=1))
+
+g4 = ggplot(training) + 
+    geom_density(aes(x=roll_dumbbell), colour="steelblue1", fill="steelblue1", data=training, alpha=0.5) + 
+    geom_density(aes(x=pitch_dumbbell), colour="red", fill="red", data=training, alpha=0.5) +
+    geom_density(aes(x=yaw_dumbbell), colour="goldenrod1", fill="goldenrod1", data=training, alpha=0.5) +
+    theme_bw() + xlab("Dumbell Movement (Yaw, Pitch, Roll)") +
+    theme(#legend.position="none", 
+           text = element_text(size=12),
+           axis.title.x=element_text(vjust = -0.5),
+           axis.title=element_text(size=12, face="bold"), 
+           title=element_text(size=9, face="bold", vjust=1))
+
+grid.arrange(arrangeGrob(g1, g2, g3, g4, ncol=2, nrow=2))
+```
+
+#### Partioning the dataset into training and validation sets
+Since the dataset we're given is pretty large, we'll keep 70% of data from the original dataset for the training purposes and remaining 30% we'll put in the validation set. The classification models will be built on the training sets and then their accuracy will be checked on validation set.
+
+```{r Creating train and test datasets, results="hide", cache=TRUE}
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+train <- training[inTrain, ]
+validate <- training[-inTrain, ]
+dim(train)
+dim(validate)
+```
+
+Next, we are going to use three different prediction algorithms to determine which one can provide the best accuracy on our validation set. The three algorithms are: decision tree, random forests and generalized boosted regression.
+
+#### Predicting with Decision trees algorithm
+
+```{r Creating decission tree, fig.height=6, fig.width=9, cache=TRUE}
+set.seed(909)
+DSmodel <- rpart(classe ~ ., data=train, method="class")
+fancyRpartPlot(DSmodel, sub="")
+```
+
+
+```{r Decision tree prediction on testing set, fig.height=6, fig.width=9, cache=TRUE}
+DSprediction <- predict(DSmodel, validate, type = "class")
+DSconf <- confusionMatrix(DSprediction, validate$classe)
+DSaccuracy <- round(DSconf$overall['Accuracy'], 4)
+print(DSconf)
+plot(DSconf$table, col = DSconf$byClass, main = paste("Decision Tree model confusion matrix: Accuracy =", round(DSconf$overall['Accuracy'], 4)))
+```
+
+The in-sample accuracy for our decision tree model is `r round(DSaccuracy*100, 2)`%. Next we make the prediction using the random forests algorithm.
+
+#### Predicting with Random forests algorithm
+
+```{r Random forest prediction on testing set, fig.height=6, fig.width=9, message=FALSE, warning=FALSE, cache=TRUE}
+set.seed(808)
+RFmodel <- randomForest(classe ~ ., data=train)
+RFprediction <- predict(RFmodel, validate, type = "class")
+RFconf <- confusionMatrix(RFprediction, validate$classe)
+print(RFconf)
+RFaccuracy <- round(RFconf$overall['Accuracy'], 4)
+plot(RFconf$table, col = RFconf$byClass, main = paste("Random Forest model confusion matrix: Accuracy =", round(RFconf$overall['Accuracy'], 4)))
+```
+
+For our random forests model in-sample prediction accuracy is `r round(RFaccuracy*100, 2)`%, which is almost perfect. Finally, we will use generalized boosted regression algorithm for our last prediction.
+
+#### Prediction with Generalized Boosted Regression algorithm
+
+```{r Generalized Boosted Regression prediction on testing set, fig.height=6, fig.width=9, message=FALSE, warning=FALSE, cache=TRUE}
+set.seed(303)
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+
+GBRmodel <- train(classe ~ ., data=train, method="gbm",
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+
+GBRfinal <- GBRmodel$finalModel
+
+GBRprediction <- predict(GBRmodel, newdata=validate)
+GBRconf <- confusionMatrix(GBRprediction, validate$classe)
+GBRaccuracy <- round(GBRconf$overall[1], 4)
+print(GBRaccuracy)
+plot(GBRconf$table, col = GBRconf$byClass, main = paste("Generalized Boosted Regression model confusion matrix: Accuracy =", round(GBRconf$overall['Accuracy'], 4)))
+```
+
+Our generalized boosted regression model has an in-sample accuracy of `r round(GBRaccuracy*100, 2)`%, which is good but not so much as the random forests algorithm.
+
+#### Model comparison
+
+Comparing the three classification algorithms used and their respective results, we conclude that random forests algorithm produced the best accuracy of `r round(RFaccuracy*100, 2)`%, so we are going to use it to make the predictions on the test data set where we expect to get out-of-sample error of only `r round((1-RFaccuracy), 2)`%.
+
+**MODEL**                      |**ACCURACY**   
+-------------------------------|---------------
+Decision Tree                  |`r DSaccuracy`
+Random Forests                 |`r RFaccuracy`
+Generalized Boosted Regression |`r GBRaccuracy`
+
+*Table 1. Accuracy comparison between three different models*
+
+#### Making predictions on the test dataset using Random forests
+
+The dataset we need to submit for evaluation has 20 observations for which we are going to use our random forests model and predict which class observation (data from different motion sensors for a particular parcipient) belongs to.
+
+```{r Prediction on the test set using RF, message=FALSE, warning=FALSE, cache=TRUE}
+library(randomForest)
+RFpredictSubmit <- predict(RFmodel, test, type = "class")
+results <- data.frame("Participant"=test$user_name, "Problem_id"=test$problem_id, "Class"=RFpredictSubmit)
+print(results)
+```
+
+#### Prediction results
+
+After submission of the predictions' results on the Coursera evaluation webpage the result of 100% prediction accuracy was received on the test dataset, so we conclude that our random forest model was very successful in this case.
+
+**Citation:**
+
+* Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013. (http://groupware.les.inf.puc-rio.br/har)
+
+
+---
+_This RMarkdown document was produced with RStudio v0.0.99.486 on R v3.2.2._
